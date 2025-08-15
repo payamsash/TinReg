@@ -29,3 +29,37 @@ Why?
 Random sequences avoid carryover/prediction effects from previous tones.
 Ensures the classifier learns pure frequency-related neural templates, not predictive activity.
 Once trained, they tested on partially and fully ordered sequences, revealing how predictions modulate neural representations.
+
+
+
+
+------------------
+1. Multiclass Linear Discriminant Analysis (LDA)
+They trained a multiclass LDA classifier.
+Multiclass LDA: a simple linear classifier that finds linear boundaries between multiple classes (here, the 4 sound frequencies).
+“On each sample point”:
+They trained separate classifiers at each time point (e.g., every millisecond or data sample in the epoch).
+This is sometimes called time-resolved decoding, giving accuracy over time for each subject.
+
+2. Averaging Accuracy Across Subjects
+After decoding, they averaged the classification accuracy for each subject, then performed group-level comparisons.
+This means the reported accuracy curves are mean accuracy across all subjects, giving a robust estimate.
+
+3. Temporal Generalization (King & Dehaene, 2014)
+Temporal generalization tests whether the pattern learned at one time point can predict other time points.
+Example:
+Train on 100–120 ms post-stimulus → test on 150 ms → see if the neural pattern generalizes.
+This creates a time × time decoding matrix, showing how stable neural patterns are over time.
+
+4. Cross-Decoding
+When testing on ordered sequences:
+They did not perform cross-validation because it’s cross-decoding: train on random tones, test on ordered tones.
+Cross-validation is only needed when training and testing on the same condition (like random tones) to avoid overfitting.
+For testing on random tones:
+They did 5-fold cross-validation (splitting random tones into 5 subsets, training on 4, testing on 1, repeated 5 times).
+
+5. Pre- vs Post-Stimulus Training
+They trained on post-stimulus intervals (after the tone onset).
+Tested on pre-stimulus intervals (before tone onset) for random tones.
+Purpose:
+This tests for predictive neural activity: can the classifier trained on responses to the sound detect pre-stimulus neural templates, reflecting anticipation or prediction.
