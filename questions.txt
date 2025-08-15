@@ -1,0 +1,31 @@
+a) Time-Generalized MVPA
+Similar to the paper, you could train a classifier on the random condition (least predictable) and then test it across partially and fully ordered sequences.
+This allows you to measure how much the brain's predictive pattern generalizes to more predictable contexts—essentially quantifying prediction strength.
+b) Regression of Prediction Strength
+For each participant, you could compute classifier performance over time and then regress it against the sequence predictability (0.25, 0.75, 1.0).
+This gives a slope (β) per subject, reflecting how sensitive their auditory system is to predictability.
+You can then compare slopes between tinnitus and control groups, as the paper did.
+c) Pre-Stimulus Activity
+The paper emphasizes that predictive coding effects appear before stimulus onset.
+Focus on time windows before each tone, not just the evoked response, to detect anticipatory differences in tinnitus.
+d) Condition-Specific Patterns
+You could explore whether certain triggers (e.g., partially ordered sequences) produce intermediate prediction responses.
+This helps identify non-linear effects of predictability, since your 75% ordered condition may reveal subtle prediction deficits not visible in fully ordered or fully random sequences.
+
+
+
+
+
+----------------
+b) Extracting Classifier Weights
+Classifier weights tell you which sensors/time points contribute most to discriminating the classes.
+In the paper, they modified MVPA-Light to extract these weights, allowing them to map neural patterns associated with each tone frequency.
+c) Four Target Classes
+Each trial presented one of four sound frequencies, so the classifier was trained to predict which frequency was presented based on the MEG/EEG data.
+This is a 4-class classification problem.
+d) Training Only on Random Sequences
+Important: they trained only on the random sequences (least predictable, 25%).
+Why?
+Random sequences avoid carryover/prediction effects from previous tones.
+Ensures the classifier learns pure frequency-related neural templates, not predictive activity.
+Once trained, they tested on partially and fully ordered sequences, revealing how predictions modulate neural representations.
