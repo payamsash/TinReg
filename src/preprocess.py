@@ -1,160 +1,140 @@
 from pathlib import Path
-import pickle
-import numpy as np
-import mne
-from mne import Report
-from mne_icalabel import label_components
-from mne.preprocessing import ICA
-from autoreject import AutoReject
-from mne.preprocessing import find_bad_channels_lof
-from tools.tools import read_vhdr_input_fname
+import matplotlib.pyplot as plt
+
+from mne.io import read_raw_brainvision
+from mne.channels import make_standard_montage
+from mne.viz import plot_projs_joint
+from mne import (
+                    set_log_level,
+                    Report,
+                    events_from_annotations,
+                    Epochs
+                    )
+from mne.preprocessing import (
+                                ICA,
+                                create_eog_epochs,
+                                compute_proj_eog,
+                                find_bad_channels_lof
+                                )
 
 
-with open("../material/fname_dict.pkl", "rb") as f:
-    mappings = pickle.load(f)
+main_dir = Path("/Volumes/G_USZ_ORL$/Research/ANTINOMICS/data/eeg")
+saving_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinreg")
+paradigm = "regularity"
+ch_types = {
+            "O1": "eog",
+            "O2": "eog",
+            "PO7": "eog",
+            "PO8": "eog",
+            "Pulse": "ecg",
+            "Resp": "ecg",
+            "Audio": "stim"
+        }
+eog_chs_1 = ["PO7", "PO8"]
+eog_chs_2 = ["O1", "O2"]
+manual_data_scroll = False
+montage = make_standard_montage("easycap-M1")
 
-sites = ["dublin", "illinois", "regensburg", "tuebingen", "zuerich"]
+subjects = []
+for fname in sorted(main_dir.iterdir()):
+    if str(fname).endswith(f"{paradigm}.vhdr"):
+        subjects.append(fname.stem.split("_")[0])
 
-main_dir = Path("/Users/payamsadeghishabestari/Tinnorm/material/raws")
-montage = mne.channels.make_standard_montage("easycap-M1")
-ec_trigger_code, eo_trigger_code = 1, 3
-cutoff = 3 # seconds
-ica_label_thr = 0.7
-overwrite = False
+subjects_to_remove = {"vuio", "nrjq"}
+subjects = [x for x in subjects if x not in subjects_to_remove]
 
-line_freqs = dict(zip(sites, [50, 60, 50, 50, 50]))
+## reading and preprocessing the files
+for subject in subjects[:1]:
+    
+    ## check paths
+    ep_dir = saving_dir / "epochs"
+    re_dir = saving_dir / "reports"
+    [sel_dir.mkdir(exist_ok=True) for sel_dir in [ep_dir, re_dir]]
+    ep_fname = ep_dir / f"{subject}-epo.fif.gz"
+    re_fname = re_dir / f"{subject}-report.html" 
+    if ep_fname.exists():
+        continue
 
-for site in sites[3:4]:
-    for subject_id, fname in mappings[site].items():
+    fname = main_dir / f"{subject}_{paradigm}.vhdr"
+    raw = read_raw_brainvision(fname, preload=True)
+    raw.set_channel_types(ch_types)
+    raw.pick(["eeg", "eog", "ecg", "stim"])
+    raw.set_montage(montage=montage, match_case=False, on_missing="warn")
+    events, events_dict = events_from_annotations(raw)
 
-        fname_save_0 = main_dir / "orig" / f"{site}_{subject_id}.fif"
-        fname_save_1 = main_dir / "preproc_1" / f"{site}_{subject_id}.fif"
-        fname_save_2 = main_dir / "preproc_2" / f"{site}_{subject_id}.fif"
-        fname_save_3 = main_dir / "preproc_3" / f"{site}_{subject_id}.fif"
-        fname_save_4 = main_dir / "reports" / f"{site}_{subject_id}.html"
-        for dir_name in [fname_save_0, fname_save_1, fname_save_2, fname_save_3, fname_save_4]:
-            dir_name.parent.mkdir(exist_ok=True)
+    if raw.info["sfreq"] > 1000.0:
+        print("resampling to 1000 ...")
+        raw, events = raw.resample(1000, stim_picks=None, events=events)
 
-        if fname_save_4.is_file():
-            continue
-        
-        if site == "dublin":
-            raw = mne.io.read_raw(fname, exclude=("EXG"))
-            
-            tmin = raw.first_samp / raw.info["sfreq"]
-            tmax = raw.last_samp / raw.info["sfreq"]
-            raw.crop(tmin=tmin + cutoff, tmax=tmax - cutoff)
+    noisy_chs, lof_scores = find_bad_channels_lof(raw, threshold=3, return_scores=True)
+    raw.info["bads"] = noisy_chs
 
-        elif site == "illinois":
-            dpo_file = fname.with_suffix('.cdt.dpo')
-            dpa_file = fname.with_suffix('.cdt.dpa')
-            if dpo_file.exists():
-                dpo_file.rename(dpa_file)
+    if manual_data_scroll:
+        raw.annotations.append(onset=0, duration=0, description="bad_segment")
+        raw.plot(duration=20.0, n_channels=80, picks="eeg", scalings=dict(eeg=40e-6), block=True)
+    
+    if len(raw.info["bads"]):
+        raw.interpolate_bads()
+    
+    ## filtering
+    raw.filter(0.1, 30)
+    raw.set_eeg_reference("average", projection=False)
+    
+    ## vertical eye movement
+    ev_eog = create_eog_epochs(raw, ch_name=eog_chs_1).average(picks="all")
+    ev_eog.apply_baseline((None, None))
+    veog_projs, _ = compute_proj_eog(raw, n_eeg=2, reject=None)
+    raw.add_proj(veog_projs)
+    raw.apply_proj()
 
-            raw = mne.io.read_raw(fname)
-            raw.drop_channels(["F11", "F12", "FT11", "FT12", "M1", "M2", "Cb1", "Cb2"])
-            transform = mne.read_trans("../material/Illinois-trans.fif")
-            raw.info["dev_head_t"] = transform
-            
-            tmin = raw.first_samp / raw.info["sfreq"]
-            tmax = raw.last_samp / raw.info["sfreq"]
-            raw.crop(tmin=tmin + cutoff, tmax=tmax - cutoff)
+    ## horizontal eye movement
+    ica = ICA(n_components=0.97, max_iter=800, method='infomax', fit_params=dict(extended=True))        
+    ica.fit(raw)
+    eog_indices, eog_scores = ica.find_bads_eog(raw, ch_name=eog_chs_2, threshold=1.2)
+    eog_indices_fil = [x for x in eog_indices if x <= 10]
+    heog_idxs = [eog_idx for eog_idx in eog_indices_fil if eog_scores[0][eog_idx] * eog_scores[1][eog_idx] < 0]
+    fig_scores = ica.plot_scores(scores=eog_scores, exclude=eog_indices_fil, show=False)
 
-        elif site in ["regensburg", "tuebingen"]:
-            raw = read_vhdr_input_fname(fname)
-
-            tmin = raw.first_samp / raw.info["sfreq"]
-            tmax = raw.last_samp / raw.info["sfreq"]
-            raw.crop(tmin=tmin + cutoff, tmax=tmax - cutoff)
-
-        elif site == "zuerich":
-            ch_types = {
-                "O1": "eog",
-                "O2": "eog",
-                "PO7": "eog",
-                "PO8": "eog",
-                "Pulse": "ecg",
-                "Resp": "ecg",
-                "Audio": "stim"
-            }
-            raw = read_vhdr_input_fname(fname)
-            raw.set_channel_types(ch_types)
-
-            ## take only eyes open part
-            events, events_dict = mne.events_from_annotations(raw)
-            eo_events = events[events[:, 2] == eo_trigger_code] 
-            ec_events = events[events[:, 2] == ec_trigger_code]
-
-            eo_events = eo_events[:, 0] + cutoff * raw.info["sfreq"]
-            ec_events = ec_events[:, 0] - cutoff * raw.info["sfreq"]
-            cropped_raws = []
-            for start_idx, end_idx in zip(eo_events, ec_events):
-                cropped_raws.append(raw.copy().crop(
-                                                    tmin=start_idx / raw.info["sfreq"],
-                                                    tmax=end_idx / raw.info["sfreq"])
-                                                    )
-            raw = mne.concatenate_raws(cropped_raws)
-
-        report = Report(title=f"report_subject_{subject_id}")
-
-        ## orig
-        raw.pick(["eeg"])
-        raw.set_montage(montage)
-        raw.load_data()
-        raw.resample(sfreq=250)
-        raw.save(fname_save_0, overwrite=overwrite)
-        report.add_raw(raw=raw, title="Recording Info", butterfly=False, psd=True)
-
-        ## preproc 1
-        raw.filter(1, 100)
-        # raw.notch_filter(freqs=line_freqs[site], picks="eeg", notch_widths=1)
-        raw.set_eeg_reference("average", projection=False)
-        epochs = mne.make_fixed_length_epochs(raw, duration=10, preload=True)
-        epochs.save(fname_save_1, overwrite=overwrite)
-        
-        ## preproc 2
-        noisy_chs, lof_scores = find_bad_channels_lof(raw, threshold=3, return_scores=True)
-        epochs.info["bads"] = noisy_chs
-        report.add_epochs(epochs=epochs, title="Epochs Info", psd=False)
-        
-        epochs = epochs.interpolate_bads()
-        ar = AutoReject(
-                        n_interpolate=np.array([1, 4, 8]),
-                        consensus=np.linspace(0, 1.0, 11),
-                        cv=5,
-                        n_jobs=1,
-                        random_state=11,
-                        verbose=True
-                        )
-        ar.fit(epochs)
-        epochs_ar, reject_log = ar.transform(epochs, return_log=True)
-        epochs_ar.save(fname_save_2, overwrite=overwrite)
-        fig_ar = reject_log.plot(show_names=1)
-        report.add_figure(fig=fig_ar, title="Autoreject Log", image_format="PNG")
-
-        ## preproc 3
-        ica = ICA(n_components=0.95, max_iter=800, method='infomax', fit_params=dict(extended=True))
-        try:
-            ica.fit(raw)
-        except:
-            ica = ICA(n_components=5, max_iter=800, method='infomax', fit_params=dict(extended=True))
-            ica.fit(epochs_ar)
-
-        ic_dict = label_components(epochs_ar, ica, method="iclabel")
-        ic_labels = ic_dict["labels"]
-        ic_probs = ic_dict["y_pred_proba"]
-        eog_indices = [idx for idx, label in enumerate(ic_labels) \
-                        if label == "eye blink" and ic_probs[idx] > ica_label_thr]
-        eog_indices_fil = [x for x in eog_indices if x <= 10]
-        
-        if len(eog_indices) > 0:
-            eog_components = ica.plot_properties(epochs_ar,
-                                                    picks=eog_indices_fil,
+    if len(heog_idxs) > 0:
+        eog_sac_components = ica.plot_properties(raw,
+                                                    picks=heog_idxs,
                                                     show=False,
                                                     )
-            ica.apply(epochs_ar, exclude=eog_indices_fil)
-        
-        epochs_ar.save(fname_save_3, overwrite=overwrite)
-        if len(eog_indices) > 0:
-            report.add_figure(fig=eog_components, title="EOG Components", image_format="PNG")
-        report.save(fname=fname_save_4, open_browser=False, overwrite=overwrite)
+        ica.apply(raw, exclude=heog_idxs)
+    
+    ## create report
+    report = Report(title=f"report_subject_{subject}")
+    report.add_raw(raw=raw, title="Recording Info", butterfly=False, psd=True)
+
+    fig_ev_eog, ax = plt.subplots(1, 1, figsize=(7.5, 3))
+    ev_eog.plot(picks="PO7", time_unit="ms", titles="", axes=ax)
+    ax.set_title("Vertical EOG")
+    ax.spines[["right", "top"]].set_visible(False)
+    ax.lines[0].set_linewidth(2)
+    ax.lines[0].set_color("magenta")
+    ev_eog.apply_baseline((None, None))
+
+    fig_eog = ev_eog.plot_joint(picks="eeg", ts_args={"time_unit": "ms"})
+    fig_proj = plot_projs_joint(veog_projs, ev_eog, picks_trace="Fp1")
+
+    for fig, title in zip([fig_ev_eog, fig_eog, fig_proj, fig_scores], ["Vertical EOG", "EOG", "EOG Projections", "Scores"]):
+        report.add_figure(fig=fig, title=title, image_format="PNG")
+    if len(heog_idxs) > 0:
+        report.add_figure(fig=eog_sac_components, title="EOG Saccade Components", image_format="PNG")
+
+    ## epoching and saving
+    epochs = Epochs(
+                        raw,
+                        events,
+                        events_dict.pop('New Segment/', None),
+                        tmin=-1,
+                        tmax=1,
+                        baseline=(None, 0),
+                        preload=True,
+                        )
+    del raw
+    evoked = epochs.average()
+    report.add_evokeds(evoked)
+
+    epochs.save(ep_fname, overwrite=True)
+    report.save(re_dir / f"{subject}-report.html", open_browser=False, overwrite=True)
