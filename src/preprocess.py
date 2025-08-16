@@ -147,8 +147,8 @@ def preprocess():
                             raw,
                             events,
                             trigger_dict,
-                            tmin=-1,
-                            tmax=1,
+                            tmin=-0.4,
+                            tmax=0.5,
                             baseline=None, # no baselining
                             preload=True,
                             )
