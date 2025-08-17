@@ -35,6 +35,7 @@ def preprocess():
     manual_data_scroll = False
     montage = make_standard_montage("easycap-M1")
     shift_in_ms = 0 # need to check later
+    sfreq = 500
 
     subjects = []
     for fname in sorted(main_dir.iterdir()):
@@ -63,9 +64,7 @@ def preprocess():
         raw.set_montage(montage=montage, match_case=False, on_missing="warn")
         events, events_dict = events_from_annotations(raw)
 
-        if raw.info["sfreq"] > 1000.0:
-            print("resampling to 1000 ...")
-            raw, events = raw.resample(1000, stim_picks=None, events=events)
+        raw, events = raw.resample(sfreq, stim_picks=None, events=events)
 
         noisy_chs, lof_scores = find_bad_channels_lof(raw, threshold=3, return_scores=True)
         raw.info["bads"] = noisy_chs
