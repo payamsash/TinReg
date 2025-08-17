@@ -12,6 +12,52 @@ d) Condition-Specific Patterns
 You could explore whether certain triggers (e.g., partially ordered sequences) produce intermediate prediction responses.
 This helps identify non-linear effects of predictability, since your 75% ordered condition may reveal subtle prediction deficits not visible in fully ordered or fully random sequences.
 
+***
+
+Decoding logic
+Classifier: multiclass LDA
+Train only on random (4 classes) using post-stim window
+Temporal generalization: train at each time point in the post window; test:
+on ordered post (post→post, cross-decoding across condition)
+on ordered pre (post→pre, the prediction test)
+optionally on random with 5-fold CV (within-condition validation)
+Balancing: equalize trial counts per class (undersample the majority if needed)
+Group level: compute scores per subject, then average and do stats.
+
+***
+
+******
+
+Testing on pre-stimulus
+In the random condition, the next tone is unpredictable. So if you train on post-stimulus and test on pre-stimulus within random, accuracy should be at chance.
+This acts as a control condition → ensures your classifier isn’t biased and there’s no artifactual decoding in pre-stimulus when there shouldn’t be.
+Cross-decoding to ordered/partially ordered
+Then they apply the classifier (trained on random post-stimulus) to the pre-stimulus activity in ordered sequences.
+Here, if decoding > chance, it means the brain is pre-activating the neural templates for the upcoming sound — evidence of predictive coding.
+
+******
+
+
+***********
+
+Normally in MVPA you:
+Train a classifier at one time point,
+Test it at the same time point (classic time-resolved decoding).
+But brain activity is dynamic — patterns at one moment may or may not generalize later.
+Temporal Generalization (King & Dehaene, 2014):
+You train the classifier at each time point,
+And then test it at every other time point.
+This yields a 2D matrix (train-time × test-time) of decoding accuracy.
+🔹 How to Read It
+Diagonal (train = test): tells you when information is decodable at the same time point (classic decoding).
+Off-diagonal generalization: tells you whether the neural code is stable across time.
+If a classifier trained at 100 ms works also at 200 ms, then the representation is sustained.
+If it only works exactly at 100 ms, then the representation is transient.
+So temporal generalization asks:
+👉 Are neural representations stable and reusable across time, or do they change dynamically?
+
+
+***********
 
 
 
