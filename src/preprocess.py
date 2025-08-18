@@ -16,10 +16,8 @@ from mne.preprocessing import (
                                 find_bad_channels_lof
                                 )
 
-def preprocess():
-    main_dir = Path("/Volumes/G_USZ_ORL$/Research/ANTINOMICS/data/eeg")
-    saving_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinreg")
-    # saving_dir = Path("/Users/payamsadeghishabestari/TinReg/sample")
+def preprocess(subject, main_dir, saving_dir):
+
     paradigm = "regularity"
     ch_types = {
                 "O1": "eog",
@@ -37,6 +35,126 @@ def preprocess():
     shift_in_ms = 0 # need to check later
     sfreq = 500
 
+    ## reading and preprocessing the files
+    ep_dir = saving_dir / "epochs"
+    re_dir = saving_dir / "reports"
+    [sel_dir.mkdir(exist_ok=True) for sel_dir in [ep_dir, re_dir]]
+    ep_fname = ep_dir / f"{subject}-epo.fif"
+    re_fname = re_dir / f"{subject}-report.html" 
+    if ep_fname.exists():
+        continue
+
+    fname = main_dir / f"{subject}_{paradigm}.vhdr"
+    raw = read_raw_brainvision(fname, preload=True)
+    raw.set_channel_types(ch_types)
+    raw.pick(["eeg", "eog", "ecg", "stim"])
+    raw.set_montage(montage=montage, match_case=False, on_missing="warn")
+    events, events_dict = events_from_annotations(raw)
+
+    raw, events = raw.resample(sfreq, stim_picks=None, events=events)
+
+    noisy_chs, lof_scores = find_bad_channels_lof(raw, threshold=3, return_scores=True)
+    raw.info["bads"] = noisy_chs
+
+    if manual_data_scroll:
+        raw.annotations.append(onset=0, duration=0, description="bad_segment")
+        raw.plot(duration=20.0, n_channels=80, picks="eeg", scalings=dict(eeg=40e-6), block=True)
+    
+    if len(raw.info["bads"]):
+        raw.interpolate_bads()
+    
+    ## filtering
+    raw.filter(0.1, 30)
+    raw.set_eeg_reference("average", projection=False)
+    
+    ## vertical eye movement
+    ev_eog = create_eog_epochs(raw, ch_name=eog_chs_1).average(picks="all")
+    ev_eog.apply_baseline((None, None))
+    veog_projs, _ = compute_proj_eog(raw, n_eeg=2, reject=None)
+    raw.add_proj(veog_projs)
+    raw.apply_proj()
+
+    ## horizontal eye movement
+    try:
+        ica = ICA(n_components=0.97, max_iter=800, method='infomax', fit_params=dict(extended=True))        
+    except:
+        ica = ICA(n_components=5, max_iter=800, method='infomax', fit_params=dict(extended=True)) 
+    
+    ica.fit(raw)
+    eog_indices, eog_scores = ica.find_bads_eog(raw, ch_name=eog_chs_2, threshold=1.2)
+    eog_indices_fil = [x for x in eog_indices if x <= 10]
+    heog_idxs = [eog_idx for eog_idx in eog_indices_fil if eog_scores[0][eog_idx] * eog_scores[1][eog_idx] < 0]
+    fig_scores = ica.plot_scores(scores=eog_scores, exclude=eog_indices_fil, show=False)
+
+    if len(heog_idxs) > 0:
+        eog_sac_components = ica.plot_properties(raw,
+                                                    picks=heog_idxs,
+                                                    show=False,
+                                                    )
+        ica.apply(raw, exclude=heog_idxs)
+    
+    ## create report
+    report = Report(title=f"report_subject_{subject}")
+    report.add_raw(raw=raw, title="Recording Info", butterfly=False, psd=True)
+
+    fig_ev_eog, ax = plt.subplots(1, 1, figsize=(7.5, 3))
+    ev_eog.plot(picks="PO7", time_unit="ms", titles="", axes=ax)
+    ax.set_title("Vertical EOG")
+    ax.spines[["right", "top"]].set_visible(False)
+    ax.lines[0].set_linewidth(2)
+    ax.lines[0].set_color("magenta")
+    ev_eog.apply_baseline((None, None))
+
+    fig_eog = ev_eog.plot_joint(picks="eeg", ts_args={"time_unit": "ms"})
+    fig_proj = plot_projs_joint(veog_projs, ev_eog, picks_trace="Fp1")
+
+    for fig, title in zip([fig_ev_eog, fig_eog, fig_proj, fig_scores], ["Vertical EOG", "EOG", "EOG Projections", "Scores"]):
+        report.add_figure(fig=fig, title=title, image_format="PNG")
+    if len(heog_idxs) > 0:
+        report.add_figure(fig=eog_sac_components, title="EOG Saccade Components", image_format="PNG")
+
+    ## epoching and saving
+    events[:, 0] = events[:, 0] + shift_in_ms
+    trigger_dict = {
+        "f1_std_or": 1,
+        "f2_std_or": 2,
+        "f3_std_or": 3,
+        "f4_std_or": 4,
+        "f1_std_rndm": 5,
+        "f2_std_rndm": 6,
+        "f3_std_rndm": 7,
+        "f4_std_rndm": 8,
+        "f1_tin_or": 11,
+        "f2_tin_or": 12,
+        "f3_tin_or": 13,
+        "f4_tin_or": 14,
+        "f1_tin_rndm": 15,
+        "f2_tin_rndm": 16,
+        "f3_tin_rndm": 17,
+        "f4_tin_rndm": 18
+    }
+    epochs = Epochs(
+                        raw,
+                        events,
+                        trigger_dict,
+                        tmin=-0.4,
+                        tmax=0.5,
+                        baseline=None, # no baselining
+                        preload=True,
+                        )
+    del raw
+    evoked = epochs.average()
+    report.add_evokeds(evoked)
+
+    epochs.save(ep_fname, overwrite=True)
+    report.save(re_dir / f"{subject}-report.h5", open_browser=False, overwrite=True)
+
+if __name__ == "__main__":
+    
+    main_dir = Path("/Volumes/G_USZ_ORL$/Research/ANTINOMICS/data/eeg")
+    saving_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinreg")
+    
+    paradigm = "regularity"
     subjects = []
     for fname in sorted(main_dir.iterdir()):
         if str(fname).endswith(f"{paradigm}.vhdr"):
@@ -45,118 +163,5 @@ def preprocess():
     subjects_to_remove = {"vuio", "nrjq"}
     subjects = [x for x in subjects if x not in subjects_to_remove]
 
-    ## reading and preprocessing the files
     for subject in subjects:
-        
-        ## check paths
-        ep_dir = saving_dir / "epochs"
-        re_dir = saving_dir / "reports"
-        [sel_dir.mkdir(exist_ok=True) for sel_dir in [ep_dir, re_dir]]
-        ep_fname = ep_dir / f"{subject}-epo.fif"
-        re_fname = re_dir / f"{subject}-report.html" 
-        if ep_fname.exists():
-            continue
-
-        fname = main_dir / f"{subject}_{paradigm}.vhdr"
-        raw = read_raw_brainvision(fname, preload=True)
-        raw.set_channel_types(ch_types)
-        raw.pick(["eeg", "eog", "ecg", "stim"])
-        raw.set_montage(montage=montage, match_case=False, on_missing="warn")
-        events, events_dict = events_from_annotations(raw)
-
-        raw, events = raw.resample(sfreq, stim_picks=None, events=events)
-
-        noisy_chs, lof_scores = find_bad_channels_lof(raw, threshold=3, return_scores=True)
-        raw.info["bads"] = noisy_chs
-
-        if manual_data_scroll:
-            raw.annotations.append(onset=0, duration=0, description="bad_segment")
-            raw.plot(duration=20.0, n_channels=80, picks="eeg", scalings=dict(eeg=40e-6), block=True)
-        
-        if len(raw.info["bads"]):
-            raw.interpolate_bads()
-        
-        ## filtering
-        raw.filter(0.1, 30)
-        raw.set_eeg_reference("average", projection=False)
-        
-        ## vertical eye movement
-        ev_eog = create_eog_epochs(raw, ch_name=eog_chs_1).average(picks="all")
-        ev_eog.apply_baseline((None, None))
-        veog_projs, _ = compute_proj_eog(raw, n_eeg=2, reject=None)
-        raw.add_proj(veog_projs)
-        raw.apply_proj()
-
-        ## horizontal eye movement
-        ica = ICA(n_components=0.97, max_iter=800, method='infomax', fit_params=dict(extended=True))        
-        ica.fit(raw)
-        eog_indices, eog_scores = ica.find_bads_eog(raw, ch_name=eog_chs_2, threshold=1.2)
-        eog_indices_fil = [x for x in eog_indices if x <= 10]
-        heog_idxs = [eog_idx for eog_idx in eog_indices_fil if eog_scores[0][eog_idx] * eog_scores[1][eog_idx] < 0]
-        fig_scores = ica.plot_scores(scores=eog_scores, exclude=eog_indices_fil, show=False)
-
-        if len(heog_idxs) > 0:
-            eog_sac_components = ica.plot_properties(raw,
-                                                        picks=heog_idxs,
-                                                        show=False,
-                                                        )
-            ica.apply(raw, exclude=heog_idxs)
-        
-        ## create report
-        report = Report(title=f"report_subject_{subject}")
-        report.add_raw(raw=raw, title="Recording Info", butterfly=False, psd=True)
-
-        fig_ev_eog, ax = plt.subplots(1, 1, figsize=(7.5, 3))
-        ev_eog.plot(picks="PO7", time_unit="ms", titles="", axes=ax)
-        ax.set_title("Vertical EOG")
-        ax.spines[["right", "top"]].set_visible(False)
-        ax.lines[0].set_linewidth(2)
-        ax.lines[0].set_color("magenta")
-        ev_eog.apply_baseline((None, None))
-
-        fig_eog = ev_eog.plot_joint(picks="eeg", ts_args={"time_unit": "ms"})
-        fig_proj = plot_projs_joint(veog_projs, ev_eog, picks_trace="Fp1")
-
-        for fig, title in zip([fig_ev_eog, fig_eog, fig_proj, fig_scores], ["Vertical EOG", "EOG", "EOG Projections", "Scores"]):
-            report.add_figure(fig=fig, title=title, image_format="PNG")
-        if len(heog_idxs) > 0:
-            report.add_figure(fig=eog_sac_components, title="EOG Saccade Components", image_format="PNG")
-
-        ## epoching and saving
-        events[:, 0] = events[:, 0] + shift_in_ms
-        trigger_dict = {
-            "f1_std_or": 1,
-            "f2_std_or": 2,
-            "f3_std_or": 3,
-            "f4_std_or": 4,
-            "f1_std_rndm": 5,
-            "f2_std_rndm": 6,
-            "f3_std_rndm": 7,
-            "f4_std_rndm": 8,
-            "f1_tin_or": 11,
-            "f2_tin_or": 12,
-            "f3_tin_or": 13,
-            "f4_tin_or": 14,
-            "f1_tin_rndm": 15,
-            "f2_tin_rndm": 16,
-            "f3_tin_rndm": 17,
-            "f4_tin_rndm": 18
-        }
-        epochs = Epochs(
-                            raw,
-                            events,
-                            trigger_dict,
-                            tmin=-0.4,
-                            tmax=0.5,
-                            baseline=None, # no baselining
-                            preload=True,
-                            )
-        del raw
-        evoked = epochs.average()
-        report.add_evokeds(evoked)
-
-        epochs.save(ep_fname, overwrite=True)
-        report.save(re_dir / f"{subject}-report.h5", open_browser=False, overwrite=True)
-
-if __name__ == "__main__":
-    preprocess()
+        preprocess(subject, main_dir, saving_dir)
