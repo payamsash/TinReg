@@ -2,35 +2,38 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mne
 
-from mne.decoding import (
-    GeneralizingEstimator,
-    LinearModel,
-    Scaler,
-    SlidingEstimator,
-    Vectorizer,
-    cross_val_multiscore,
-    get_coef,
-)
-
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedKFold
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+
+from mne.viz import plot_events
+from mne.datasets import fetch_fsaverage
+from mne.minimum_norm import make_inverse_operator, write_inverse_operator
 
 from mne import (
-                events_from_annotations,
-                Epochs,
-                open_report,
-                compute_covariance
+                    read_epochs, 
+                    concatenate_epochs,
+                    open_report,
+                    compute_covariance,
+                    make_forward_solution
                 )
+
+from mne.decoding import (
+                            GeneralizingEstimator,
+                            LinearModel,
+                            Scaler,
+                            Vectorizer,
+                            cross_val_multiscore,
+                            get_coef,
+                            )
 
 
 def split_epochs(subject_id):
 
 
     ## read and modify epochs/report
-    epochs = mne.read_epochs(f"../sample/epochs/{subject_id}-epo.fif", preload=True)
+    epochs = read_epochs(f"../sample/epochs/{subject_id}-epo.fif", preload=True)
     report = open_report(fname_report)
     sfreq = epochs.info["sfreq"]
     epochs.pick(picks="eeg")
@@ -39,7 +42,7 @@ def split_epochs(subject_id):
     even_ids.pop("New Segment/", None)
 
     fig_events, ax = plt.subplots(1, 1, figsize=(10, 4), layout="tight")
-    mne.viz.plot_events(epochs.events, sfreq=sfreq, event_id=even_ids, axes=ax)
+    plot_events(epochs.events, sfreq=sfreq, event_id=even_ids, axes=ax)
     ax.get_legend().remove()
     ax.spines[["right", "top"]].set_visible(False)
     fig_drop = epochs.plot_drop_log(show=False)
@@ -51,7 +54,7 @@ def split_epochs(subject_id):
     rnd_ids = [key for key in even_ids if key.endswith("rndm")]
     eps_list = [epochs[rnd_id] for rnd_id in rnd_ids]
     mne.epochs.equalize_epoch_counts(eps_list, method="mintime")
-    epochs_rnd = mne.concatenate_epochs(eps_list)
+    epochs_rnd = concatenate_epochs(eps_list)
 
     ord_ids = [key for key in even_ids if key.endswith("or")]
     epochs_ord = epochs[ord_ids]
