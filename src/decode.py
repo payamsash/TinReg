@@ -131,16 +131,16 @@ def decode(subject, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_t
 
         scores_post_pre = np.array(scores_post_pre)
 
-        ## compute coefficients (should be fixed becasue coef should be estimated from full fit not on a cv)
-        coef_filt = get_coef(gen, "filters_", inverse_transform=False) # (n_chs, n_class, n_time)
-        coef_patt = get_coef(gen, "patterns_", inverse_transform=True)[0] # (n_chs, n_class, n_time)
+        # ## compute coefficients (should be fixed becasue coef should be estimated from full fit not on a cv)
+        # coef_filt = get_coef(gen, "filters_", inverse_transform=False) # (n_chs, n_class, n_time)
+        # coef_patt = get_coef(gen, "patterns_", inverse_transform=True)[0] # (n_chs, n_class, n_time)
 
         ## save scores and coeffs 
         np.save(scores_dir / f"{subject}_rnd_post2post_{label}.npy", scores_post_post)
         np.save(scores_dir / f"{subject}_rnd_post2pre_{label}.npy", scores_post_pre)
 
-        np.save(coeffs_dir / f"{subject}_rnd_params_{label}.npy", coef_filt)
-        np.save(coeffs_dir / f"{subject}_rnd_patterns_{label}.npy", coef_patt)
+        # np.save(coeffs_dir / f"{subject}_rnd_params_{label}.npy", coef_filt)
+        # np.save(coeffs_dir / f"{subject}_rnd_patterns_{label}.npy", coef_patt)
 
         ## source space decoding
         stcs = run_source_analysis(coef_patt, epochs_rnd)
