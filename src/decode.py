@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import mne
@@ -29,12 +30,19 @@ from mne.decoding import (
                             )
 
 
-def split_epochs(subject_id):
+def split_epochs(subject, saving_dir):
 
+    ## check paths
+    ep_fname = saving_dir / "epochs" / f"{subject}-epo.fif"
+    re_fname1 = saving_dir / "reports" / f"{subject}-report.h5" 
+    re_fname2 = saving_dir / "reports" / f"{subject}-report.html"
+    
+    if re_fname2.exists():
+        return None
 
     ## read and modify epochs/report
-    epochs = read_epochs(f"../sample/epochs/{subject_id}-epo.fif", preload=True)
-    report = open_report(fname_report)
+    epochs = read_epochs(ep_fname, preload=True)
+    report = open_report(re_fname)
     sfreq = epochs.info["sfreq"]
     epochs.pick(picks="eeg")
     epochs.drop_bad(reject=dict(eeg=40e-6))
@@ -73,6 +81,8 @@ def split_epochs(subject_id):
     epochs_ord_std = epochs_ord[[f"f{i}_std_or" for i in ids]]
     epochs_ord_tin = epochs_ord[[f"f{i}_tin_or" for i in ids]]
 
+    report.save(saving_dir / "reports" / f"{subject}-report.html")
+
     del epochs_ord, epochs_rnd
 
     return epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_tin
@@ -80,10 +90,14 @@ def split_epochs(subject_id):
 
 
 
-def decode(epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_tin):
+def decode(subject, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_tin):
     
     ###### train clf on random trials
     n_splits = 5
+    scores_dir = saving_dir / "scores"
+    coeffs_dir = saving_dir / "coeffs"
+    stcs_dir = saving_dir / "stcs"
+    [sel_dir.mkdir(exist_ok=True) for sel_dir in [scores_dir, coeffs_dir, stcs_dir]]
 
     labels = ["standard", "tinnitus"]
     for epochs_rnd, epochs_ord, label in zip([epochs_rnd_std, epochs_rnd_tin], [epochs_ord_std, epochs_ord_tin], labels):
@@ -117,15 +131,20 @@ def decode(epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_tin):
 
         scores_post_pre = np.array(scores_post_pre)
 
-        ## compute coefficients
+        ## compute coefficients (should be fixed becasue coef should be estimated from full fit not on a cv)
         coef_filt = get_coef(gen, "filters_", inverse_transform=False) # (n_chs, n_class, n_time)
         coef_patt = get_coef(gen, "patterns_", inverse_transform=True)[0] # (n_chs, n_class, n_time)
 
-        ## save in numpy array  
-        np.save("", score ...)
+        ## save scores and coeffs 
+        np.save(scores_dir / f"{subject}_rnd_post2post_{label}.npy", scores_post_post)
+        np.save(scores_dir / f"{subject}_rnd_post2pre_{label}.npy", scores_post_pre)
+
+        np.save(coeffs_dir / f"{subject}_rnd_params_{label}.npy", coef_filt)
+        np.save(coeffs_dir / f"{subject}_rnd_patterns_{label}.npy", coef_patt)
 
         ## source space decoding
-        run_source_analysis(coef_patt, epochs_rnd)
+        stcs = run_source_analysis(coef_patt, epochs_rnd)
+        [stc.save(stcs_dir / f"{subject}_rnd_class_{stc_idx + 1}") for stc_idx, stc in enumerate(stcs)]
 
         ## test on ordered tones
         X_ord = epochs_ord.get_data()
@@ -145,10 +164,14 @@ def decode(epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_tin):
         score_ord_pre = gen.score(X_ord_pre, y_ord)
 
         coef_filt_ord = get_coef(gen, "filters_", inverse_transform=False) # (n_chs, n_class, n_time)
-        coef_patt_ord = get_coef(gen, "patterns_", inverse_transform=True)[0] # (n_chs, n_class, n_time)
+        coef_patt_ord = get_coef(gen, "patterns_", inverse_transform=True)[0] # (n_chs, n_class, n_time) # check this later
 
         ## save in numpy array  
-        np.save("", score ...)
+        np.save(scores_dir / f"{subject}_ord_post2post_{label}.npy", score_ord_post)
+        np.save(scores_dir / f"{subject}_ord_post2pre_{label}.npy", score_ord_pre)
+
+        np.save(coeffs_dir / f"{subject}_ord_params_{label}.npy", coef_filt_ord)
+        np.save(coeffs_dir / f"{subject}_ord_patterns_{label}.npy", coef_patt_ord)
 
 
 def run_source_analysis(coef_patt, epochs):
@@ -185,16 +208,17 @@ def run_source_analysis(coef_patt, epochs):
                                 fwd,
                                 noise_cov
                                 )
-    
+    stcs = []
     for evoked in evokeds:
-        stc = apply_inverse(
+        stcs.append(
+                    apply_inverse(
                             evoked, 
                             inv,
                             lambda2=1.0 / 9.0,
                             method="dSPM",
                             pick_ori="normal"
                             )
+                    )
     
     del fwd, inv
-    
-    stc.save("...")
+    return stcs
