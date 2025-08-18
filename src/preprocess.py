@@ -52,7 +52,7 @@ def preprocess():
         ep_dir = saving_dir / "epochs"
         re_dir = saving_dir / "reports"
         [sel_dir.mkdir(exist_ok=True) for sel_dir in [ep_dir, re_dir]]
-        ep_fname = ep_dir / f"{subject}-epo.fif.gz"
+        ep_fname = ep_dir / f"{subject}-epo.fif"
         re_fname = re_dir / f"{subject}-report.html" 
         if ep_fname.exists():
             continue
@@ -156,7 +156,7 @@ def preprocess():
         report.add_evokeds(evoked)
 
         epochs.save(ep_fname, overwrite=True)
-        report.save(re_dir / f"{subject}-report.html", open_browser=False, overwrite=True)
+        report.save(re_dir / f"{subject}-report.h5", open_browser=False, overwrite=True)
 
 if __name__ == "__main__":
     preprocess()
