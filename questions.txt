@@ -109,3 +109,23 @@ They trained on post-stimulus intervals (after the tone onset).
 Tested on pre-stimulus intervals (before tone onset) for random tones.
 Purpose:
 This tests for predictive neural activity: can the classifier trained on responses to the sound detect pre-stimulus neural templates, reflecting anticipation or prediction.
+
+
+
+
+
+
+-----------------
+. Random tones → Post-stimulus activity
+In random trials, the brain cannot predict the next tone (no structure).
+So, the classifier learns sensory-driven neural patterns in the 0–500 ms post-stimulus window, reflecting how the brain encodes each carrier frequency after it is heard.
+This is the ground truth neural template for each tone frequency.
+
+
+In ordered sequences, tones follow a predictable pattern (e.g., ascending or repeating order).
+Before the next tone actually arrives, the brain can internally pre-activate the sensory representation of the expected frequency.
+This predictive pre-activation should resemble the actual post-stimulus response from the random condition (because the “template” is the same).
+
+If the pre-stimulus signal in ordered trials looks similar to the post-stimulus sensory template from random trials,
+→ the classifier trained on random-post will generalize above chance to ordered-pre.
+If there’s no predictive coding, accuracy in ordered-pre would stay at chance (~25% for 4 classes).
