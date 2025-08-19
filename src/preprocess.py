@@ -34,6 +34,7 @@ def preprocess(subject, main_dir, saving_dir):
     montage = make_standard_montage("easycap-M1")
     shift_in_ms = 0 # need to check later
     sfreq = 500
+    show = False
 
     ## reading and preprocessing the files
     ep_dir = saving_dir / "epochs"
@@ -41,8 +42,9 @@ def preprocess(subject, main_dir, saving_dir):
     [sel_dir.mkdir(exist_ok=True) for sel_dir in [ep_dir, re_dir]]
     ep_fname = ep_dir / f"{subject}-epo.fif"
     re_fname = re_dir / f"{subject}-report.html" 
+    
     if ep_fname.exists():
-        continue
+        return None
 
     fname = main_dir / f"{subject}_{paradigm}.vhdr"
     raw = read_raw_brainvision(fname, preload=True)
@@ -84,7 +86,7 @@ def preprocess(subject, main_dir, saving_dir):
     eog_indices, eog_scores = ica.find_bads_eog(raw, ch_name=eog_chs_2, threshold=1.2)
     eog_indices_fil = [x for x in eog_indices if x <= 10]
     heog_idxs = [eog_idx for eog_idx in eog_indices_fil if eog_scores[0][eog_idx] * eog_scores[1][eog_idx] < 0]
-    fig_scores = ica.plot_scores(scores=eog_scores, exclude=eog_indices_fil, show=False)
+    fig_scores = ica.plot_scores(scores=eog_scores, exclude=eog_indices_fil, show=show)
 
     if len(heog_idxs) > 0:
         eog_sac_components = ica.plot_properties(raw,
@@ -98,15 +100,15 @@ def preprocess(subject, main_dir, saving_dir):
     report.add_raw(raw=raw, title="Recording Info", butterfly=False, psd=True)
 
     fig_ev_eog, ax = plt.subplots(1, 1, figsize=(7.5, 3))
-    ev_eog.plot(picks="PO7", time_unit="ms", titles="", axes=ax)
+    ev_eog.plot(picks="PO7", time_unit="ms", titles="", axes=ax, show=show)
     ax.set_title("Vertical EOG")
     ax.spines[["right", "top"]].set_visible(False)
     ax.lines[0].set_linewidth(2)
     ax.lines[0].set_color("magenta")
     ev_eog.apply_baseline((None, None))
 
-    fig_eog = ev_eog.plot_joint(picks="eeg", ts_args={"time_unit": "ms"})
-    fig_proj = plot_projs_joint(veog_projs, ev_eog, picks_trace="Fp1")
+    fig_eog = ev_eog.plot_joint(picks="eeg", ts_args={"time_unit": "ms"}, show=show)
+    fig_proj = plot_projs_joint(veog_projs, ev_eog, picks_trace="Fp1", show=show)
 
     for fig, title in zip([fig_ev_eog, fig_eog, fig_proj, fig_scores], ["Vertical EOG", "EOG", "EOG Projections", "Scores"]):
         report.add_figure(fig=fig, title=title, image_format="PNG")
@@ -142,12 +144,12 @@ def preprocess(subject, main_dir, saving_dir):
                         baseline=None, # no baselining
                         preload=True,
                         )
-    del raw
     evoked = epochs.average()
     report.add_evokeds(evoked)
 
     epochs.save(ep_fname, overwrite=True)
     report.save(re_dir / f"{subject}-report.h5", open_browser=False, overwrite=True)
+    del raw
 
 if __name__ == "__main__":
     
@@ -163,5 +165,5 @@ if __name__ == "__main__":
     subjects_to_remove = {"vuio", "nrjq"}
     subjects = [x for x in subjects if x not in subjects_to_remove]
 
-    for subject in subjects:
+    for subject in subjects[:2]:
         preprocess(subject, main_dir, saving_dir)
