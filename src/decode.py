@@ -39,8 +39,7 @@ def split_epochs(subject, saving_dir):
     overwrite = True
     
     if re_fname2.exists():
-        # return None
-        pass
+        return None
 
     ## read and modify epochs/report
     epochs = read_epochs(ep_fname, preload=True)
@@ -96,7 +95,7 @@ def split_epochs(subject, saving_dir):
 def decode(subject, saving_dir, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_tin):
     
     ###### train clf on random trials
-    n_splits = 2
+    n_splits = 5
     scores_dir = saving_dir / "scores"
     coeffs_dir = saving_dir / "coeffs"
     stcs_dir = saving_dir / "stcs"
@@ -139,7 +138,6 @@ def decode(subject, saving_dir, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, 
             gen.fit(X_post_rnd[train_idx], y[train_idx]) # train on post
             score = gen.score(X_pre_rnd[test_idx], y[test_idx]) # test on pre
             scores_post_pre.append(score)
-
         scores_post_pre = np.array(scores_post_pre)
 
         ## save scores and coeffs 
@@ -148,7 +146,8 @@ def decode(subject, saving_dir, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, 
 
         ## source space decoding for random post
         stcs = run_source_analysis(coef_patt, epochs_rnd)
-        [stc.save(stcs_dir / f"{subject}_rnd_class_{stc_idx + 1}") for stc_idx, stc in enumerate(stcs)]
+        return stcs
+        [stc.save(stcs_dir / f"{subject}_rnd_class_{label}_{stc_idx + 1}") for stc_idx, stc in enumerate(stcs)]
 
         ## test on ordered tones
         X_ord = epochs_ord.get_data()
