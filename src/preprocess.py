@@ -33,7 +33,8 @@ def preprocess(subject, main_dir, saving_dir):
     manual_data_scroll = False
     montage = make_standard_montage("easycap-M1")
     shift_in_ms = 0 # need to check later
-    sfreq = 500
+    sfreq_1 = 1000
+    sfreq_2 = 100
     show = False
 
     ## reading and preprocessing the files
@@ -53,7 +54,8 @@ def preprocess(subject, main_dir, saving_dir):
     raw.set_montage(montage=montage, match_case=False, on_missing="warn")
     events, events_dict = events_from_annotations(raw)
 
-    raw, events = raw.resample(sfreq, stim_picks=None, events=events)
+    if raw.info["sfreq"] > 1000.0:
+        raw, events = raw.resample(sfreq_1, stim_picks=None, events=events)
 
     noisy_chs, lof_scores = find_bad_channels_lof(raw, threshold=3, return_scores=True)
     raw.info["bads"] = noisy_chs
@@ -144,6 +146,7 @@ def preprocess(subject, main_dir, saving_dir):
                         baseline=None, # no baselining
                         preload=True,
                         )
+    epochs.resample(sfreq_2)
     evoked = epochs.average()
     report.add_evokeds(evoked)
 
