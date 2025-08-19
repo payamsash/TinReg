@@ -10,7 +10,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
 from mne.viz import plot_events
 from mne.datasets import fetch_fsaverage
-from mne.minimum_norm import make_inverse_operator, write_inverse_operator
+from mne.minimum_norm import make_inverse_operator, apply_inverse
 
 from mne import (
                     read_epochs, 
@@ -36,21 +36,23 @@ def split_epochs(subject, saving_dir):
     ep_fname = saving_dir / "epochs" / f"{subject}-epo.fif"
     re_fname1 = saving_dir / "reports" / f"{subject}-report.h5" 
     re_fname2 = saving_dir / "reports" / f"{subject}-report.html"
+    overwrite = True
     
     if re_fname2.exists():
-        return None
+        # return None
+        pass
 
     ## read and modify epochs/report
     epochs = read_epochs(ep_fname, preload=True)
-    report = open_report(re_fname)
+    report = open_report(re_fname1)
     sfreq = epochs.info["sfreq"]
     epochs.pick(picks="eeg")
-    epochs.drop_bad(reject=dict(eeg=40e-6))
+    epochs.drop_bad(reject=dict(eeg=100e-6)) # maybe totally remove this
     even_ids = epochs.event_id
     even_ids.pop("New Segment/", None)
 
     fig_events, ax = plt.subplots(1, 1, figsize=(10, 4), layout="tight")
-    plot_events(epochs.events, sfreq=sfreq, event_id=even_ids, axes=ax)
+    plot_events(epochs.events, sfreq=sfreq, event_id=even_ids, axes=ax, show=False)
     ax.get_legend().remove()
     ax.spines[["right", "top"]].set_visible(False)
     fig_drop = epochs.plot_drop_log(show=False)
@@ -67,8 +69,8 @@ def split_epochs(subject, saving_dir):
     ord_ids = [key for key in even_ids if key.endswith("or")]
     epochs_ord = epochs[ord_ids]
 
-    report.add_info(epochs_rnd.info, title="Random trials info")
-    report.add_info(epochs_ord.info, title="Ordered trials info")
+    report.add_epochs(epochs_rnd, title="Random trials info", psd=False, projs=False)
+    report.add_epochs(epochs_ord, title="Ordered trials info", psd=False, projs=False)
 
     ## compute covariance matrix from rnd epochs
     cov = compute_covariance(epochs_rnd, tmax=0.0)
@@ -81,7 +83,8 @@ def split_epochs(subject, saving_dir):
     epochs_ord_std = epochs_ord[[f"f{i}_std_or" for i in ids]]
     epochs_ord_tin = epochs_ord[[f"f{i}_tin_or" for i in ids]]
 
-    report.save(saving_dir / "reports" / f"{subject}-report.html")
+    report.save(saving_dir / "reports" / f"{subject}-report.html",
+                overwrite=overwrite, open_browser=False)
 
     del epochs_ord, epochs_rnd
 
@@ -90,10 +93,10 @@ def split_epochs(subject, saving_dir):
 
 
 
-def decode(subject, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_tin):
+def decode(subject, saving_dir, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_tin):
     
     ###### train clf on random trials
-    n_splits = 5
+    n_splits = 2
     scores_dir = saving_dir / "scores"
     coeffs_dir = saving_dir / "coeffs"
     stcs_dir = saving_dir / "stcs"
@@ -117,12 +120,20 @@ def decode(subject, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_t
                             LinearModel(LinearDiscriminantAnalysis(solver="svd"))
                             )
         gen = GeneralizingEstimator(clf, scoring="accuracy", n_jobs=1, verbose=True)
-        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-        ## post -> post
+        ## train post -> test post with fit (to extract weights)
+        gen.fit(X_post_rnd, y)
+        coef_filt = get_coef(gen, "filters_", inverse_transform=False)
+        coef_patt = get_coef(gen, "patterns_", inverse_transform=True)[0] # (n_chs, n_class, n_time)
+
+        np.save(coeffs_dir / f"{subject}_rnd_params_{label}.npy", coef_filt)
+        np.save(coeffs_dir / f"{subject}_rnd_patterns_{label}.npy", coef_patt)
+
+        ## train post -> test post with cv
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
         scores_post_post = cross_val_multiscore(gen, X_post_rnd, y, cv=cv, n_jobs=1)
 
-        ## post -> pre
+        ## train post -> test pre
         scores_post_pre = []
         for train_idx, test_idx in cv.split(X_post_rnd, y):
             gen.fit(X_post_rnd[train_idx], y[train_idx]) # train on post
@@ -131,18 +142,11 @@ def decode(subject, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_t
 
         scores_post_pre = np.array(scores_post_pre)
 
-        # ## compute coefficients (should be fixed becasue coef should be estimated from full fit not on a cv)
-        # coef_filt = get_coef(gen, "filters_", inverse_transform=False) # (n_chs, n_class, n_time)
-        # coef_patt = get_coef(gen, "patterns_", inverse_transform=True)[0] # (n_chs, n_class, n_time)
-
         ## save scores and coeffs 
         np.save(scores_dir / f"{subject}_rnd_post2post_{label}.npy", scores_post_post)
         np.save(scores_dir / f"{subject}_rnd_post2pre_{label}.npy", scores_post_pre)
 
-        # np.save(coeffs_dir / f"{subject}_rnd_params_{label}.npy", coef_filt)
-        # np.save(coeffs_dir / f"{subject}_rnd_patterns_{label}.npy", coef_patt)
-
-        ## source space decoding
+        ## source space decoding for random post
         stcs = run_source_analysis(coef_patt, epochs_rnd)
         [stc.save(stcs_dir / f"{subject}_rnd_class_{stc_idx + 1}") for stc_idx, stc in enumerate(stcs)]
 
@@ -152,12 +156,12 @@ def decode(subject, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_t
 
         times_ord = epochs_ord.times
         post_mask_ord = epochs_ord.times >= 0
-        pre_mask_ord  = epochs_ord < 0
+        pre_mask_ord  = epochs_ord.times < 0
 
         X_ord_post = X_ord[:, :, post_mask_ord]
         X_ord_pre  = X_ord[:, :, pre_mask_ord]
 
-        gen.fit(X_post, y) # train again on random
+        gen.fit(X_post_rnd, y) # train again on random
 
         ## scores and coeffs
         score_ord_post = gen.score(X_ord_post, y_ord)
@@ -176,6 +180,7 @@ def decode(subject, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, epochs_ord_t
 
 def run_source_analysis(coef_patt, epochs):
 
+    epochs.set_eeg_reference("average", projection=True)
     evokeds = []
     for i_cls in range(4):
         evokeds.append(
@@ -222,3 +227,13 @@ def run_source_analysis(coef_patt, epochs):
     
     del fwd, inv
     return stcs
+
+
+if __name__ == "__main__":
+
+    saving_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinreg")
+    eps_dir = saving_dir / "epochs"
+    subjects = [fname.stem[:4] for fname in sorted(eps_dir.iterdir()) if not fname.stem.startswith(".")]
+    for subject in subjects[:2]:
+        epochs_list = split_epochs(subject, saving_dir)
+        decode(subject, saving_dir, *epochs_list)
