@@ -35,6 +35,7 @@ def preprocess(subject, main_dir, saving_dir):
     shift_in_ms = 0 # need to check later
     sfreq_1 = 1000
     sfreq_2 = 100
+    (tmin, tmax) = (-0.4, 0.5)
     show = False
 
     ## reading and preprocessing the files
@@ -74,7 +75,7 @@ def preprocess(subject, main_dir, saving_dir):
     ## vertical eye movement
     ev_eog = create_eog_epochs(raw, ch_name=eog_chs_1).average(picks="all")
     ev_eog.apply_baseline((None, None))
-    veog_projs, _ = compute_proj_eog(raw, n_eeg=2, reject=None)
+    veog_projs, _ = compute_proj_eog(raw, n_eeg=1, reject=None) # so only blink
     raw.add_proj(veog_projs)
     raw.apply_proj()
 
@@ -141,8 +142,8 @@ def preprocess(subject, main_dir, saving_dir):
                         raw,
                         events,
                         trigger_dict,
-                        tmin=-0.4,
-                        tmax=0.5,
+                        tmin=tmin,
+                        tmax=tmax,
                         baseline=None, # no baselining
                         preload=True,
                         )
