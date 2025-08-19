@@ -1,6 +1,8 @@
 from pathlib import Path
+import datetime
 import matplotlib.pyplot as plt
 
+from mne_icalabel import label_components
 from mne.io import read_raw_brainvision
 from mne.channels import make_standard_montage
 from mne.viz import plot_projs_joint
@@ -16,20 +18,28 @@ from mne.preprocessing import (
                                 find_bad_channels_lof
                                 )
 
-def preprocess(subject, main_dir, saving_dir):
+def preprocess(subject, main_dir, saving_dir, use_ssp):
 
     paradigm = "regularity"
-    ch_types = {
-                "O1": "eog",
-                "O2": "eog",
-                "PO7": "eog",
-                "PO8": "eog",
-                "Pulse": "ecg",
-                "Resp": "ecg",
-                "Audio": "stim"
-            }
-    eog_chs_1 = ["PO7", "PO8"]
-    eog_chs_2 = ["O1", "O2"]
+    if use_ssp:
+        ch_types = {
+                    "O1": "eog",
+                    "O2": "eog",
+                    "PO7": "eog",
+                    "PO8": "eog",
+                    "Pulse": "ecg",
+                    "Resp": "ecg",
+                    "Audio": "stim"
+                }
+        eog_chs_1 = ["PO7", "PO8"]
+        eog_chs_2 = ["O1", "O2"]
+    else:
+        ch_types = {
+                    "Pulse": "ecg",
+                    "Resp": "ecg",
+                    "Audio": "stim"
+                }
+
     manual_data_scroll = False
     montage = make_standard_montage("easycap-M1")
     shift_in_ms = 0 # need to check later
@@ -72,51 +82,81 @@ def preprocess(subject, main_dir, saving_dir):
     raw.filter(0.1, 30)
     raw.set_eeg_reference("average", projection=False)
     
-    ## vertical eye movement
-    ev_eog = create_eog_epochs(raw, ch_name=eog_chs_1).average(picks="all")
-    ev_eog.apply_baseline((None, None))
-    veog_projs, _ = compute_proj_eog(raw, n_eeg=1, reject=None) # so only blink
-    raw.add_proj(veog_projs)
-    raw.apply_proj()
-
-    ## horizontal eye movement
-    try:
-        ica = ICA(n_components=0.97, max_iter=800, method='infomax', fit_params=dict(extended=True))        
-    except:
-        ica = ICA(n_components=5, max_iter=800, method='infomax', fit_params=dict(extended=True)) 
     
-    ica.fit(raw)
-    eog_indices, eog_scores = ica.find_bads_eog(raw, ch_name=eog_chs_2, threshold=1.2)
-    eog_indices_fil = [x for x in eog_indices if x <= 10]
-    heog_idxs = [eog_idx for eog_idx in eog_indices_fil if eog_scores[0][eog_idx] * eog_scores[1][eog_idx] < 0]
-    fig_scores = ica.plot_scores(scores=eog_scores, exclude=eog_indices_fil, show=show)
+    if use_ssp:
 
-    if len(heog_idxs) > 0:
-        eog_sac_components = ica.plot_properties(raw,
-                                                    picks=heog_idxs,
-                                                    show=False,
-                                                    )
-        ica.apply(raw, exclude=heog_idxs)
+        ## vertical eye movement
+        ev_eog = create_eog_epochs(raw, ch_name=eog_chs_1).average(picks="all")
+        ev_eog.apply_baseline((None, None))
+        veog_projs, _ = compute_proj_eog(raw, n_eeg=1, reject=None) # so only blink
+        raw.add_proj(veog_projs)
+        raw.apply_proj()
+
+        ## horizontal eye movement
+        try:
+            ica = ICA(n_components=0.97, max_iter=800, method='infomax', fit_params=dict(extended=True))        
+        except:
+            ica = ICA(n_components=5, max_iter=800, method='infomax', fit_params=dict(extended=True)) 
+    
+        ica.fit(raw)
+        eog_indices, eog_scores = ica.find_bads_eog(raw, ch_name=eog_chs_2, threshold=1.2)
+        eog_indices_fil = [x for x in eog_indices if x <= 10]
+        heog_idxs = [eog_idx for eog_idx in eog_indices_fil if eog_scores[0][eog_idx] * eog_scores[1][eog_idx] < 0]
+        fig_scores = ica.plot_scores(scores=eog_scores, exclude=eog_indices_fil, show=show)
+
+        if len(heog_idxs) > 0:
+            eog_sac_components = ica.plot_properties(
+                                                        raw,
+                                                        picks=heog_idxs,
+                                                        show=show,
+                                                        )
+            ica.apply(raw, exclude=heog_idxs)
+
+    else:
+        try:
+            ica = ICA(n_components=0.97, max_iter=800, method='infomax', fit_params=dict(extended=True))        
+        except:
+            ica = ICA(n_components=5, max_iter=800, method='infomax', fit_params=dict(extended=True)) 
+    
+        ica.fit(raw)
+        ic_dict = label_components(raw, ica, method="iclabel")
+        ic_labels = ic_dict["labels"]
+        ic_probs = ic_dict["y_pred_proba"]
+        eog_indices = [idx for idx, label in enumerate(ic_labels) \
+                        if label == "eye blink" and ic_probs[idx] > 0.70]
+        eog_indices_fil = [x for x in eog_indices if x <= 10]
+
+        if len(eog_indices) > 0:
+            eog_components = ica.plot_properties(raw,
+                                                picks=eog_indices_fil,
+                                                show=show,
+                                                )
+            
+        ica.apply(raw, exclude=eog_indices_fil)
     
     ## create report
     report = Report(title=f"report_subject_{subject}")
     report.add_raw(raw=raw, title="Recording Info", butterfly=False, psd=True)
 
-    fig_ev_eog, ax = plt.subplots(1, 1, figsize=(7.5, 3))
-    ev_eog.plot(picks="PO7", time_unit="ms", titles="", axes=ax, show=show)
-    ax.set_title("Vertical EOG")
-    ax.spines[["right", "top"]].set_visible(False)
-    ax.lines[0].set_linewidth(2)
-    ax.lines[0].set_color("magenta")
-    ev_eog.apply_baseline((None, None))
+    if use_ssp:
+        fig_ev_eog, ax = plt.subplots(1, 1, figsize=(7.5, 3))
+        ev_eog.plot(picks="PO7", time_unit="ms", titles="", axes=ax, show=show)
+        ax.set_title("Vertical EOG")
+        ax.spines[["right", "top"]].set_visible(False)
+        ax.lines[0].set_linewidth(2)
+        ax.lines[0].set_color("magenta")
+        ev_eog.apply_baseline((None, None))
 
-    fig_eog = ev_eog.plot_joint(picks="eeg", ts_args={"time_unit": "ms"}, show=show)
-    fig_proj = plot_projs_joint(veog_projs, ev_eog, picks_trace="Fp1", show=show)
+        fig_eog = ev_eog.plot_joint(picks="eeg", ts_args={"time_unit": "ms"}, show=show)
+        fig_proj = plot_projs_joint(veog_projs, ev_eog, picks_trace="Fp1", show=show)
 
-    for fig, title in zip([fig_ev_eog, fig_eog, fig_proj, fig_scores], ["Vertical EOG", "EOG", "EOG Projections", "Scores"]):
-        report.add_figure(fig=fig, title=title, image_format="PNG")
-    if len(heog_idxs) > 0:
-        report.add_figure(fig=eog_sac_components, title="EOG Saccade Components", image_format="PNG")
+        for fig, title in zip([fig_ev_eog, fig_eog, fig_proj, fig_scores], ["Vertical EOG", "EOG", "EOG Projections", "Scores"]):
+            report.add_figure(fig=fig, title=title, image_format="PNG")
+        if len(heog_idxs) > 0:
+            report.add_figure(fig=eog_sac_components, title="EOG Saccade Components", image_format="PNG")
+    else:
+        if len(eog_indices) > 0:
+            report.add_figure(fig=eog_components, title="EOG Components", image_format="PNG")
 
     ## epoching and saving
     events[:, 0] = events[:, 0] + shift_in_ms
@@ -159,15 +199,23 @@ if __name__ == "__main__":
     
     main_dir = Path("/Volumes/G_USZ_ORL$/Research/ANTINOMICS/data/eeg")
     saving_dir = Path("/Volumes/Extreme_SSD/payam_data/Tinreg")
+    cutoff_date = datetime.datetime(2025, 6, 3) # 3rd June
     
     paradigm = "regularity"
     subjects = []
-    for fname in sorted(main_dir.iterdir()):
+    ssp_usage = []
+    for fname in sorted(main_dir.iterdir(), key=lambda f: f.stat().st_mtime):
         if str(fname).endswith(f"{paradigm}.vhdr"):
+            mtime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
+            if mtime < cutoff_date:
+                ssp_usage.append(True)
+            else:
+                ssp_usage.append(False)
             subjects.append(fname.stem.split("_")[0])
 
-    subjects_to_remove = {"vuio", "nrjq"}
-    subjects = [x for x in subjects if x not in subjects_to_remove]
+    subjects_to_remove = ["vuio", "nrjq"]
 
-    for subject in subjects[:2]:
-        preprocess(subject, main_dir, saving_dir)
+    for subject, use_ssp in zip(subjects, ssp_usage):
+        if subject in subjects_to_remove:
+            continue
+        preprocess(subject, main_dir, saving_dir, use_ssp)
