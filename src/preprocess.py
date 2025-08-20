@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import datetime
 import matplotlib.pyplot as plt
 
@@ -212,6 +213,11 @@ if __name__ == "__main__":
             else:
                 ssp_usage.append(False)
             subjects.append(fname.stem.split("_")[0])
+
+    mapping = dict(zip(subjects, ssp_usage))
+    with open('/Users/payamsadeghishabestari/TinReg/sample/subjects_dict.pkl', 'w') as f:
+        json.dump(mapping, f, indent=4)
+        
 
     subjects_to_remove = ["vuio", "nrjq"]
 
