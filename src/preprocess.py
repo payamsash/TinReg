@@ -54,7 +54,6 @@ def preprocess(subject, main_dir, saving_dir, use_ssp):
     re_dir = saving_dir / "reports"
     [sel_dir.mkdir(exist_ok=True) for sel_dir in [ep_dir, re_dir]]
     ep_fname = ep_dir / f"{subject}-epo.fif"
-    re_fname = re_dir / f"{subject}-report.html" 
     
     if ep_fname.exists():
         return None
@@ -215,13 +214,15 @@ if __name__ == "__main__":
             subjects.append(fname.stem.split("_")[0])
 
     mapping = dict(zip(subjects, ssp_usage))
-    with open('/Users/payamsadeghishabestari/TinReg/sample/subjects_dict.pkl', 'w') as f:
+    with open('../sample/subjects_dict.json', 'w') as f:
         json.dump(mapping, f, indent=4)
         
-
     subjects_to_remove = ["vuio", "nrjq"]
 
     for subject, use_ssp in zip(subjects, ssp_usage):
         if subject in subjects_to_remove:
             continue
         preprocess(subject, main_dir, saving_dir, use_ssp)
+
+
+
