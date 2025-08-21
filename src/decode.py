@@ -146,7 +146,6 @@ def decode(subject, saving_dir, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, 
 
         ## source space decoding for random post
         stcs = run_source_analysis(coef_patt, epochs_rnd)
-        return stcs
         [stc.save(stcs_dir / f"{subject}_rnd_class_{label}_{stc_idx + 1}") for stc_idx, stc in enumerate(stcs)]
 
         ## test on ordered tones
