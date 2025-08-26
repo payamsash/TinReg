@@ -162,8 +162,15 @@ def decode(subject, saving_dir, epochs_rnd_std, epochs_rnd_tin, epochs_ord_std, 
         gen.fit(X_post_rnd, y) # train again on random
 
         ## scores and coeffs
-        score_ord_post = gen.score(X_ord_post, y_ord)
-        score_ord_pre = gen.score(X_ord_pre, y_ord)
+        if label == "standard":
+            mapping_ord_2_rnd = dict(zip(range(1, 5), range(5, 9)))
+        if label == "tinnitus":
+            mapping_ord_2_rnd = dict(zip(range(11, 15), range(15, 19)))
+        
+        y_ord_mapped = np.array([mapping_ord_2_rnd[val] for val in y_ord])
+
+        score_ord_post = gen.score(X_ord_post, y_ord_mapped)
+        score_ord_pre = gen.score(X_ord_pre, y_ord_mapped)
 
         coef_filt_ord = get_coef(gen, "filters_", inverse_transform=False) # (n_chs, n_class, n_time)
         coef_patt_ord = get_coef(gen, "patterns_", inverse_transform=True)[0] # (n_chs, n_class, n_time) # check this later
